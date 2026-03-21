@@ -1,0 +1,18 @@
+{
+  "editor.formatOnSave": true,
+  "files.associations": {
+    "*.h": "c",
+    "*.c": "c",
+    "sdkconfig": "ini",
+    "sdkconfig.defaults": "ini"
+  },
+  "C_Cpp.default.configurationProvider": "espressif.esp-idf-extension",
+  "idf.flashType": "UART",
+  "idf.portWin": "COM10",
+  "idf.adapterTargetName": "esp32s3",
+  "files.exclude": {
+    "**/build/**": true,
+    "**/managed_components/**": true
+  },
+  "github.copilot.chat.codeGeneration.useInstructionFiles": true
+}

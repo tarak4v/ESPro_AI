@@ -1,0 +1,17 @@
+# Ignore secrets
+main/secrets.h
+
+# Build output
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+
+# IDE
+.vscode/*.log
+*.pyc
+__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
