@@ -4,22 +4,23 @@
  *
  * Initialises hardware, subsystems, and starts the OS kernel tasks.
  * Boot sequence:
- *   1. NVS + LittleFS storage
+ *   1. NVS + LittleFS storage + config manager
  *   2. Display + backlight
  *   3. Touch controller
  *   4. I2C buses + sensors (IMU, RTC)
  *   5. Audio subsystem (I2S + codecs)
- *   6. WiFi + NTP
- *   7. LVGL init
+ *   6. WiFi (APSTA mode) + webserver
+ *   7. LVGL init + theme (config-driven)
  *   8. Event bus + perf monitor
  *   9. AI subsystems
- *  10. OS kernel → start all tasks
+ *  10. OTA manager + OS kernel → start all tasks
  */
 
 #include "hw_config.h"
 #include "os_kernel.h"
 #include "event_bus.h"
 #include "perf_monitor.h"
+#include "lvgl.h"
 
 /* HAL */
 #include "hal/display.h"
@@ -39,6 +40,11 @@
 /* Services */
 #include "services/wifi_manager.h"
 #include "services/storage.h"
+#include "services/config_manager.h"
+#include "services/webserver.h"
+#include "services/ota_manager.h"
+
+#include "i2c_bsp.h"
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -54,22 +60,27 @@ void app_main(void)
     ESP_LOGI(TAG, "║   ESPro AI — Multi-Modal Watch   ║");
     ESP_LOGI(TAG, "╚══════════════════════════════════╝");
 
-    /* 1. Storage */
+    /* 1. Storage + Config */
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
         nvs_flash_erase();
         nvs_flash_init();
     }
     storage_init();
-    ESP_LOGI(TAG, "[1/10] Storage ready");
+    config_manager_init();
+    const device_config_t *cfg = config_get();
+    ESP_LOGI(TAG, "[1/10] Storage + config ready (device: %s)", cfg->device_name);
 
-    /* 2. Display */
+    /* 2. Display (lv_init must precede LVGL driver registration) */
+    lv_init();
     display_init();
     ESP_LOGI(TAG, "[2/10] Display ready");
 
-    /* 3. Touch */
+    /* 3. I2C buses + Touch */
+    i2c_master_Init();
     touch_init();
-    ESP_LOGI(TAG, "[3/10] Touch ready");
+    ESP_LOGI(TAG, "[3/10] I2C + Touch ready");
 
     /* 4. Sensors */
     imu_init();
@@ -80,14 +91,15 @@ void app_main(void)
     audio_init();
     ESP_LOGI(TAG, "[5/10] Audio ready");
 
-    /* 6. WiFi */
+    /* 6. WiFi (APSTA) + Config Webserver */
     wifi_manager_init();
-    ESP_LOGI(TAG, "[6/10] WiFi starting...");
+    webserver_start();
+    ESP_LOGI(TAG, "[6/10] WiFi APSTA + config portal ready");
 
-    /* 7. LVGL */
+    /* 7. LVGL + Theme (config-driven) */
     ui_manager_init();
     theme_init();
-    ESP_LOGI(TAG, "[7/10] LVGL + theme ready");
+    ESP_LOGI(TAG, "[7/10] LVGL + theme ready (%s)", theme_get_name(cfg->theme_id));
 
     /* 8. Core OS services */
     event_bus_init();
@@ -97,9 +109,12 @@ void app_main(void)
     /* 9. AI */
     voice_pipeline_init();
     agent_orchestrator_init();
-    ESP_LOGI(TAG, "[9/10] AI subsystems ready");
+    ESP_LOGI(TAG, "[9/10] AI subsystems ready (STT: %s, LLM: %s)",
+             config_get_provider_name(cfg->stt_provider),
+             config_get_provider_name(cfg->llm_provider));
 
-    /* 10. Start tasks */
+    /* 10. OTA + Start tasks */
+    ota_manager_init();
     os_kernel_start_tasks();
 
     int64_t boot_ms = (esp_timer_get_time() - boot_start) / 1000;

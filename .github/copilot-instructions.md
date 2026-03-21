@@ -20,7 +20,8 @@ run concurrently in background.
 ├─────────────────────────────────────────────────┤
 │  UI Layer (ui_manager, theme, screens, widgets)  │
 ├─────────────────────────────────────────────────┤
-│  Services (wifi_manager, storage)                │
+│  Services (config_manager, wifi_manager, storage,│
+│            webserver, ota_manager)                │
 ├─────────────────────────────────────────────────┤
 │  Core OS (os_kernel, event_bus, perf_monitor)    │
 ├─────────────────────────────────────────────────┤
@@ -91,4 +92,8 @@ The perf monitor:
 7. **640×172** display — all layouts for this widescreen
 8. **i2c_writr_buff** — the typo is intentional, do not fix
 9. **snprintf** always — never sprintf
-10. **Secrets** in `secrets.h` (gitignored)
+10. **Config-driven** — all user settings via `config_manager`, never hardcode
+11. **WiFi APSTA** — AP always on for config portal at 192.168.4.1
+12. **5 Themes** — Dark, Light, Autumn, Spring, Monsoon (pastel palettes)
+13. **OTA ready** — dual app partitions (ota_0 / ota_1), 16MB flash
+14. **AI providers** — configurable: Groq, OpenAI, Claude, Gemini, HuggingFace

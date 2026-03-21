@@ -4,7 +4,7 @@
  */
 
 #include "ai/llm_client.h"
-#include "secrets.h"
+#include "services/config_manager.h"
 #include "core/perf_monitor.h"
 
 #include "esp_http_client.h"
@@ -16,22 +16,25 @@
 
 static const char *TAG = "llm";
 
-#define LLM_URL     "https://api.groq.com/openai/v1/chat/completions"
-#define LLM_MODEL   "llama-3.3-70b-versatile"
-#define MAX_RESP     (8 * 1024)
+#define LLM_URL "https://api.groq.com/openai/v1/chat/completions"
+#define LLM_MODEL "llama-3.3-70b-versatile"
+#define MAX_RESP (8 * 1024)
 
-typedef struct {
+typedef struct
+{
     char *buf;
-    int   len;
-    int   cap;
+    int len;
+    int cap;
 } resp_ctx_t;
 
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
     resp_ctx_t *ctx = evt->user_data;
-    if (evt->event_id == HTTP_EVENT_ON_DATA && ctx) {
+    if (evt->event_id == HTTP_EVENT_ON_DATA && ctx)
+    {
         int new_len = ctx->len + evt->data_len;
-        if (new_len < ctx->cap) {
+        if (new_len < ctx->cap)
+        {
             memcpy(ctx->buf + ctx->len, evt->data, evt->data_len);
             ctx->len = new_len;
             ctx->buf[ctx->len] = '\0';
@@ -43,14 +46,16 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 bool llm_chat(const char *system_prompt, const char *user_msg,
               char *out, size_t out_len)
 {
-    if (!user_msg || !out) return false;
+    if (!user_msg || !out)
+        return false;
 
     /* Build JSON body */
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "model", LLM_MODEL);
     cJSON *msgs = cJSON_AddArrayToObject(root, "messages");
 
-    if (system_prompt) {
+    if (system_prompt)
+    {
         cJSON *sys = cJSON_CreateObject();
         cJSON_AddStringToObject(sys, "role", "system");
         cJSON_AddStringToObject(sys, "content", system_prompt);
@@ -67,7 +72,8 @@ bool llm_chat(const char *system_prompt, const char *user_msg,
 
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    if (!body) return false;
+    if (!body)
+        return false;
 
     /* Response buffer */
     resp_ctx_t ctx = {
@@ -75,18 +81,30 @@ bool llm_chat(const char *system_prompt, const char *user_msg,
         .len = 0,
         .cap = MAX_RESP - 1,
     };
-    if (!ctx.buf) { free(body); return false; }
+    if (!ctx.buf)
+    {
+        free(body);
+        return false;
+    }
     ctx.buf[0] = '\0';
 
-    char auth[128];
-    snprintf(auth, sizeof(auth), "Bearer %s", GROQ_API_KEY);
+    const char *api_key = config_get_api_key(config_get()->llm_provider);
+    if (!api_key || strlen(api_key) == 0)
+    {
+        ESP_LOGE(TAG, "No API key configured for LLM provider");
+        free(body);
+        heap_caps_free(ctx.buf);
+        return false;
+    }
+    char auth[256];
+    snprintf(auth, sizeof(auth), "Bearer %s", api_key);
 
     esp_http_client_config_t cfg = {
-        .url               = LLM_URL,
-        .timeout_ms        = 15000,
+        .url = LLM_URL,
+        .timeout_ms = 15000,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .event_handler     = http_event_handler,
-        .user_data         = &ctx,
+        .event_handler = http_event_handler,
+        .user_data = &ctx,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
@@ -100,15 +118,19 @@ bool llm_chat(const char *system_prompt, const char *user_msg,
     free(body);
 
     bool ok = false;
-    if (err == ESP_OK && status == 200) {
+    if (err == ESP_OK && status == 200)
+    {
         cJSON *resp = cJSON_Parse(ctx.buf);
-        if (resp) {
+        if (resp)
+        {
             cJSON *choices = cJSON_GetObjectItem(resp, "choices");
-            if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
+            if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0)
+            {
                 cJSON *msg = cJSON_GetObjectItem(
                     cJSON_GetArrayItem(choices, 0), "message");
                 cJSON *content = cJSON_GetObjectItem(msg, "content");
-                if (cJSON_IsString(content)) {
+                if (cJSON_IsString(content))
+                {
                     strncpy(out, content->valuestring, out_len - 1);
                     out[out_len - 1] = '\0';
                     ok = true;
@@ -116,11 +138,14 @@ bool llm_chat(const char *system_prompt, const char *user_msg,
             }
             cJSON_Delete(resp);
         }
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG, "LLM error: %s, status=%d", esp_err_to_name(err), status);
     }
 
     heap_caps_free(ctx.buf);
-    if (ok) ESP_LOGI(TAG, "LLM response: %.60s...", out);
+    if (ok)
+        ESP_LOGI(TAG, "LLM response: %.60s...", out);
     return ok;
 }

@@ -23,6 +23,9 @@ idf_component_register(
         "ai/intent_engine.c"
         "services/wifi_manager.c"
         "services/storage.c"
+        "services/config_manager.c"
+        "services/webserver.c"
+        "services/ota_manager.c"
         "test/perf_test.c"
     INCLUDE_DIRS
         "."
@@ -38,7 +41,12 @@ idf_component_register(
         esp_timer
         esp_wifi
         esp_http_client
+        esp_http_server
+        esp_https_ota
+        esp-tls
         esp_psram
+        esp_app_format
+        app_update
         nvs_flash
         json
         i2c_bsp

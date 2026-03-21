@@ -14,5 +14,6 @@
     "**/build/**": true,
     "**/managed_components/**": true
   },
-  "github.copilot.chat.codeGeneration.useInstructionFiles": true
+  "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+  "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.5.1/"
 }

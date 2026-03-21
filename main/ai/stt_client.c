@@ -4,7 +4,7 @@
  */
 
 #include "ai/stt_client.h"
-#include "secrets.h"
+#include "services/config_manager.h"
 #include "core/perf_monitor.h"
 
 #include "esp_http_client.h"
@@ -16,8 +16,8 @@
 
 static const char *TAG = "stt";
 
-#define GROQ_STT_URL    "https://api.groq.com/openai/v1/audio/transcriptions"
-#define MAX_RESP_BUF    4096
+#define GROQ_STT_URL "https://api.groq.com/openai/v1/audio/transcriptions"
+#define MAX_RESP_BUF 4096
 
 /* WAV header for 16-bit mono PCM */
 static void write_wav_header(uint8_t *buf, uint32_t data_size, uint16_t sample_rate)
@@ -43,18 +43,21 @@ static void write_wav_header(uint8_t *buf, uint32_t data_size, uint16_t sample_r
     memcpy(buf + 40, &data_size, 4);
 }
 
-typedef struct {
+typedef struct
+{
     char *buf;
-    int   len;
-    int   cap;
+    int len;
+    int cap;
 } resp_ctx_t;
 
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
     resp_ctx_t *ctx = evt->user_data;
-    if (evt->event_id == HTTP_EVENT_ON_DATA && ctx) {
+    if (evt->event_id == HTTP_EVENT_ON_DATA && ctx)
+    {
         int new_len = ctx->len + evt->data_len;
-        if (new_len < ctx->cap) {
+        if (new_len < ctx->cap)
+        {
             memcpy(ctx->buf + ctx->len, evt->data, evt->data_len);
             ctx->len = new_len;
             ctx->buf[ctx->len] = '\0';
@@ -66,14 +69,16 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 bool stt_transcribe(const int16_t *samples, size_t count,
                     char *out, size_t out_len)
 {
-    if (!samples || count == 0 || !out) return false;
+    if (!samples || count == 0 || !out)
+        return false;
 
     uint32_t data_size = count * sizeof(int16_t);
-    uint32_t wav_size  = 44 + data_size;
+    uint32_t wav_size = 44 + data_size;
 
     /* Build WAV in PSRAM */
     uint8_t *wav = heap_caps_malloc(wav_size, MALLOC_CAP_SPIRAM);
-    if (!wav) {
+    if (!wav)
+    {
         ESP_LOGE(TAG, "Failed to alloc WAV buffer (%lu bytes)", wav_size);
         return false;
     }
@@ -84,25 +89,28 @@ bool stt_transcribe(const int16_t *samples, size_t count,
     const char *boundary = "----ESProAI";
     size_t body_cap = wav_size + 512;
     char *body = heap_caps_malloc(body_cap, MALLOC_CAP_SPIRAM);
-    if (!body) {
+    if (!body)
+    {
         heap_caps_free(wav);
         return false;
     }
 
     int pos = snprintf(body, body_cap,
-        "--%s\r\n"
-        "Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n"
-        "Content-Type: audio/wav\r\n\r\n", boundary);
+                       "--%s\r\n"
+                       "Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n"
+                       "Content-Type: audio/wav\r\n\r\n",
+                       boundary);
     memcpy(body + pos, wav, wav_size);
     pos += wav_size;
     pos += snprintf(body + pos, body_cap - pos,
-        "\r\n--%s\r\n"
-        "Content-Disposition: form-data; name=\"model\"\r\n\r\n"
-        "whisper-large-v3-turbo"
-        "\r\n--%s\r\n"
-        "Content-Disposition: form-data; name=\"response_format\"\r\n\r\n"
-        "text"
-        "\r\n--%s--\r\n", boundary, boundary, boundary);
+                    "\r\n--%s\r\n"
+                    "Content-Disposition: form-data; name=\"model\"\r\n\r\n"
+                    "whisper-large-v3-turbo"
+                    "\r\n--%s\r\n"
+                    "Content-Disposition: form-data; name=\"response_format\"\r\n\r\n"
+                    "text"
+                    "\r\n--%s--\r\n",
+                    boundary, boundary, boundary);
 
     heap_caps_free(wav);
 
@@ -112,21 +120,33 @@ bool stt_transcribe(const int16_t *samples, size_t count,
         .len = 0,
         .cap = MAX_RESP_BUF - 1,
     };
-    if (!ctx.buf) { heap_caps_free(body); return false; }
+    if (!ctx.buf)
+    {
+        heap_caps_free(body);
+        return false;
+    }
     ctx.buf[0] = '\0';
 
-    /* HTTP POST */
-    char auth[128];
-    snprintf(auth, sizeof(auth), "Bearer %s", GROQ_API_KEY);
+    /* HTTP POST — use API key from config_manager */
+    const char *api_key = config_get_api_key(config_get()->stt_provider);
+    if (!api_key || strlen(api_key) == 0)
+    {
+        ESP_LOGE(TAG, "No API key configured for STT provider");
+        heap_caps_free(body);
+        heap_caps_free(ctx.buf);
+        return false;
+    }
+    char auth[256];
+    snprintf(auth, sizeof(auth), "Bearer %s", api_key);
     char ct[64];
     snprintf(ct, sizeof(ct), "multipart/form-data; boundary=%s", boundary);
 
     esp_http_client_config_t cfg = {
-        .url               = GROQ_STT_URL,
-        .timeout_ms        = 15000,
+        .url = GROQ_STT_URL,
+        .timeout_ms = 15000,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .event_handler     = http_event_handler,
-        .user_data         = &ctx,
+        .event_handler = http_event_handler,
+        .user_data = &ctx,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
@@ -140,12 +160,15 @@ bool stt_transcribe(const int16_t *samples, size_t count,
     heap_caps_free(body);
 
     bool ok = false;
-    if (err == ESP_OK && status == 200 && ctx.len > 0) {
+    if (err == ESP_OK && status == 200 && ctx.len > 0)
+    {
         strncpy(out, ctx.buf, out_len - 1);
         out[out_len - 1] = '\0';
         ok = true;
         ESP_LOGI(TAG, "STT result (%d chars): %.60s", ctx.len, out);
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG, "STT error: %s, status=%d", esp_err_to_name(err), status);
     }
 

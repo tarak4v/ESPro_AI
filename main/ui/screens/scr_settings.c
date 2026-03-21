@@ -11,13 +11,19 @@
 #include "core/perf_monitor.h"
 #include "lvgl.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include <stdio.h>
+
+/* Forward declarations for self-referencing callbacks */
+void scr_settings_create(void);
+void scr_settings_destroy(void);
 
 static lv_obj_t *scr = NULL;
 static lv_obj_t *lbl_perf = NULL;
 
 static void theme_toggle_cb(lv_event_t *e)
 {
-    theme_toggle();
+    theme_cycle();
     /* Recreate screen to apply new theme */
     scr_settings_destroy();
     scr_settings_create();
@@ -84,7 +90,9 @@ void scr_settings_create(void)
     lv_obj_set_style_bg_color(btn_theme, lv_color_hex(th_btn), 0);
     lv_obj_add_event_cb(btn_theme, theme_toggle_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lbl_th = lv_label_create(btn_theme);
-    lv_label_set_text(lbl_th, g_theme_dark ? "Light" : "Dark");
+    char theme_buf[32];
+    snprintf(theme_buf, sizeof(theme_buf), "%s " LV_SYMBOL_REFRESH, theme_get_name(theme_get_current()));
+    lv_label_set_text(lbl_th, theme_buf);
     lv_obj_center(lbl_th);
 
     /* Performance stats */

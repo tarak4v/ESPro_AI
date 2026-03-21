@@ -50,8 +50,8 @@ void os_kernel_start_tasks(void)
     xTaskCreatePinnedToCore(app_manager_task, "app_mgr",
                             4096, NULL, 4, &g_task_app, 1);
 
-    /* Voice pipeline needs large stack for HTTP + audio buffers — use PSRAM */
-    StaticTask_t *voice_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_SPIRAM);
+    /* Voice pipeline needs large stack for HTTP + audio buffers — use PSRAM for stack, internal for TCB */
+    StaticTask_t *voice_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     StackType_t  *voice_stk = heap_caps_calloc(1, 24576 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
     if (voice_tcb && voice_stk) {
         g_task_voice = xTaskCreateStaticPinnedToCore(

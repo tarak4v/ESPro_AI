@@ -10,20 +10,26 @@
 #include "core/perf_monitor.h"
 #include "hal/touch.h"
 #include "hw_config.h"
+#include "i2c_bsp.h"
+#include "driver/i2c_master.h"
 
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lvgl.h"
 
 static const char *TAG = "ui_mgr";
+
+#define LVGL_TICK_PERIOD_MS 2
 
 static screen_id_t s_current = SCR_HOME;
 static screen_id_t s_pending = SCR_HOME;
 static bool s_switch_pending = false;
 
 /* Screen function tables */
-typedef struct {
+typedef struct
+{
     void (*create)(void);
     void (*update)(void);
     void (*destroy)(void);
@@ -40,31 +46,103 @@ extern void scr_settings_update(void);
 extern void scr_settings_destroy(void);
 
 static const screen_ops_t s_screens[SCR_COUNT] = {
-    [SCR_HOME]     = { scr_home_create,     scr_home_update,     scr_home_destroy },
-    [SCR_APPS]     = { scr_apps_create,     scr_apps_update,     scr_apps_destroy },
-    [SCR_SETTINGS] = { scr_settings_create, scr_settings_update, scr_settings_destroy },
+    [SCR_HOME] = {scr_home_create, scr_home_update, scr_home_destroy},
+    [SCR_APPS] = {scr_apps_create, scr_apps_update, scr_apps_destroy},
+    [SCR_SETTINGS] = {scr_settings_create, scr_settings_update, scr_settings_destroy},
 };
 
-/* ── LVGL input device callback ── */
+/* ── Swipe detection state ── */
+#define SWIPE_MIN_PX 40
+static bool s_touch_tracking = false;
+static int16_t s_touch_start_x = 0;
+static int16_t s_touch_last_x = 0;
+
+/* ── LVGL input device callback — reads touch directly via I2C
+      (matching working SS_Smallstart_VS project) ── */
+static uint32_t s_indev_call_count = 0;
+
 static void indev_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
-    int16_t x, y;
-    bool pressed;
-    touch_get_last(&x, &y, &pressed);
-    data->point.x = x;
-    data->point.y = y;
-    data->state = pressed ? LV_INDEV_DATA_PRESSED : LV_INDEV_DATA_RELEASED;
+    uint8_t cmd[11] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 0x0E, 0, 0, 0};
+    uint8_t buf[32];
+    memset(buf, 0, sizeof(buf));
+
+    uint8_t ret = i2c_master_touch_write_read(disp_touch_dev_handle, cmd, 11, buf, 32);
+
+    /* Debug: log first few calls and any touch events */
+    s_indev_call_count++;
+    if (s_indev_call_count <= 5 || (s_indev_call_count % 500 == 0))
+    {
+        ESP_LOGI(TAG, "indev_cb #%lu: ret=%d buf[0..5]=%02X %02X %02X %02X %02X %02X",
+                 (unsigned long)s_indev_call_count, ret,
+                 buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
+    }
+
+    uint16_t px = (((uint16_t)buf[2] & 0x0F) << 8) | (uint16_t)buf[3];
+    uint16_t py = (((uint16_t)buf[4] & 0x0F) << 8) | (uint16_t)buf[5];
+
+    if (buf[1] > 0 && buf[1] < 5)
+    {
+        if (px > LCD_H_RES)
+            px = LCD_H_RES;
+        if (py > LCD_V_RES)
+            py = LCD_V_RES;
+        int16_t sx = LCD_H_RES - (int16_t)px;
+        int16_t sy = LCD_V_RES - (int16_t)py;
+
+        data->state = LV_INDEV_STATE_PRESSED;
+        data->point.x = sx;
+        data->point.y = sy;
+
+        if (!s_touch_tracking)
+        {
+            s_touch_tracking = true;
+            s_touch_start_x = sx;
+        }
+        s_touch_last_x = sx;
+    }
+    else
+    {
+        data->state = LV_INDEV_STATE_RELEASED;
+
+        if (s_touch_tracking)
+        {
+            s_touch_tracking = false;
+            int16_t dx = s_touch_last_x - s_touch_start_x;
+            if (dx < -SWIPE_MIN_PX)
+                event_post(EVT_TOUCH_SWIPE_LEFT, -dx);
+            else if (dx > SWIPE_MIN_PX)
+                event_post(EVT_TOUCH_SWIPE_RIGHT, dx);
+        }
+    }
+}
+
+/* ── LVGL tick callback ── */
+static void lvgl_tick_cb(void *arg)
+{
+    (void)arg;
+    lv_tick_inc(LVGL_TICK_PERIOD_MS);
 }
 
 /* ── Init ── */
 void ui_manager_init(void)
 {
-    lv_init();
+    /* lv_init() already called in app_main before display_init */
+
+    /* Start periodic LVGL tick timer */
+    const esp_timer_create_args_t tick_args = {
+        .callback = lvgl_tick_cb,
+        .name = "lvgl_tick",
+    };
+    esp_timer_handle_t tick_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer,
+                                             LVGL_TICK_PERIOD_MS * 1000));
 
     /* Register touch input device */
     static lv_indev_drv_t indev_drv;
     lv_indev_drv_init(&indev_drv);
-    indev_drv.type    = LV_INDEV_TYPE_POINTER;
+    indev_drv.type = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb = indev_read_cb;
     lv_indev_drv_register(&indev_drv);
 
@@ -76,10 +154,12 @@ void lvgl_render_task(void *arg)
 {
     ESP_LOGI(TAG, "LVGL render task started on core %d", xPortGetCoreID());
 
-    while (1) {
+    while (1)
+    {
         int64_t t0 = esp_timer_get_time();
 
-        if (lvgl_lock(50)) {
+        if (lvgl_lock(50))
+        {
             lv_timer_handler();
             lvgl_unlock();
         }
@@ -97,20 +177,21 @@ void lvgl_render_task(void *arg)
 
 static void handle_navigation(const event_t *evt, void *ctx)
 {
-    switch (evt->type) {
-        case EVT_TOUCH_SWIPE_LEFT:
-            if (s_current < SCR_COUNT - 1)
-                ui_switch_screen(s_current + 1);
-            break;
-        case EVT_TOUCH_SWIPE_RIGHT:
-            if (s_current > 0)
-                ui_switch_screen(s_current - 1);
-            break;
-        case EVT_BUTTON_PRESS:
-            ui_switch_screen((s_current + 1) % SCR_COUNT);
-            break;
-        default:
-            break;
+    switch (evt->type)
+    {
+    case EVT_TOUCH_SWIPE_LEFT:
+        if (s_current < SCR_COUNT - 1)
+            ui_switch_screen(s_current + 1);
+        break;
+    case EVT_TOUCH_SWIPE_RIGHT:
+        if (s_current > 0)
+            ui_switch_screen(s_current - 1);
+        break;
+    case EVT_BUTTON_PRESS:
+        ui_switch_screen((s_current + 1) % SCR_COUNT);
+        break;
+    default:
+        break;
     }
 }
 
@@ -122,16 +203,20 @@ void app_manager_task(void *arg)
     event_subscribe(EVT_CAT_INPUT, handle_navigation, NULL);
 
     /* Create initial screen */
-    if (lvgl_lock(100)) {
+    if (lvgl_lock(100))
+    {
         s_screens[s_current].create();
         lvgl_unlock();
     }
 
-    while (1) {
+    while (1)
+    {
         /* Handle pending screen switch */
-        if (s_switch_pending) {
+        if (s_switch_pending)
+        {
             s_switch_pending = false;
-            if (lvgl_lock(100)) {
+            if (lvgl_lock(100))
+            {
                 s_screens[s_current].destroy();
                 s_current = s_pending;
                 s_screens[s_current].create();
@@ -142,7 +227,8 @@ void app_manager_task(void *arg)
         }
 
         /* Periodic screen update */
-        if (lvgl_lock(50)) {
+        if (lvgl_lock(50))
+        {
             s_screens[s_current].update();
             lvgl_unlock();
         }
@@ -153,7 +239,8 @@ void app_manager_task(void *arg)
 
 void ui_switch_screen(screen_id_t id)
 {
-    if (id >= SCR_COUNT) return;
+    if (id >= SCR_COUNT)
+        return;
     s_pending = id;
     s_switch_pending = true;
 }

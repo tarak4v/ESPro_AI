@@ -10,7 +10,11 @@ extern i2c_master_dev_handle_t imu_dev_handle;
 extern i2c_master_dev_handle_t es8311_dev_handle;
 extern i2c_master_dev_handle_t es7210_dev_handle;
 extern i2c_master_bus_handle_t i2c_port0_bus_handle;
+extern i2c_master_bus_handle_t i2c_bus_1_handle;
 extern esp_io_expander_handle_t io_expander_handle;
+
+/* Aliases for HAL layer compatibility */
+#define imu_handle imu_dev_handle
 
 #ifdef __cplusplus
 extern "C" {
