@@ -6,30 +6,62 @@
 #include "ui/ui_manager.h"
 #include "ui/theme.h"
 #include "hw_config.h"
+#include "services/music_stream.h"
 #include "lvgl.h"
+#include <stdio.h>
 
 static lv_obj_t *scr = NULL;
 
-typedef struct {
+typedef struct
+{
     const char *icon;
     const char *label;
 } app_entry_t;
 
 static const app_entry_t s_apps[] = {
-    { LV_SYMBOL_AUDIO,    "Music" },
-    { LV_SYMBOL_SETTINGS, "Settings" },
-    { LV_SYMBOL_WIFI,     "WiFi" },
-    { LV_SYMBOL_BLUETOOTH,"BLE" },
-    { LV_SYMBOL_GPS,      "Health" },
-    { LV_SYMBOL_CALL,     "AI Chat" },
+    {LV_SYMBOL_AUDIO, "Music"},
+    {LV_SYMBOL_SETTINGS, "Settings"},
+    {LV_SYMBOL_CALL, "Meeting"},
+    {LV_SYMBOL_CALL, "AI Chat"},
 };
 #define APP_COUNT (sizeof(s_apps) / sizeof(s_apps[0]))
 
 static void app_btn_cb(lv_event_t *e)
 {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
-    if (idx == 1) ui_switch_screen(SCR_SETTINGS);
-    /* Other app handlers can post events to the agent orchestrator */
+    switch (idx)
+    {
+    case 0: /* Music — toggle radio */
+        if (music_stream_is_playing())
+        {
+            music_stream_stop();
+            ui_switch_screen(SCR_HOME);
+            scr_home_set_stage_text("Radio stopped");
+        }
+        else
+        {
+            music_stream_play();
+            ui_switch_screen(SCR_HOME);
+            {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Radio: %s", music_stream_station_name());
+                scr_home_set_stage_text(msg);
+            }
+        }
+        break;
+    case 1: /* Settings */
+        ui_switch_screen(SCR_SETTINGS);
+        break;
+    case 2: /* Meeting — open meeting screen */
+        ui_switch_screen(SCR_MEETING);
+        break;
+    case 3: /* AI Chat — go home, ready for voice */
+        ui_switch_screen(SCR_HOME);
+        scr_home_set_stage_text("Hold mic to speak");
+        break;
+    default:
+        break;
+    }
 }
 
 void scr_apps_create(void)
@@ -41,7 +73,8 @@ void scr_apps_create(void)
 
     /* Layout apps in a horizontal row (fits well on 640×172) */
     int spacing = LCD_H_RES / (APP_COUNT + 1);
-    for (int i = 0; i < (int)APP_COUNT; i++) {
+    for (int i = 0; i < (int)APP_COUNT; i++)
+    {
         lv_obj_t *btn = lv_btn_create(scr);
         lv_obj_set_size(btn, 80, 80);
         lv_obj_set_pos(btn, spacing * (i + 1) - 40, 20);
@@ -73,5 +106,9 @@ void scr_apps_update(void)
 
 void scr_apps_destroy(void)
 {
-    if (scr) { lv_obj_del(scr); scr = NULL; }
+    if (scr)
+    {
+        lv_obj_del(scr);
+        scr = NULL;
+    }
 }

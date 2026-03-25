@@ -14,6 +14,9 @@ void display_init(void);
 /** Set backlight brightness (0=full bright, 255=off, inverted PWM). */
 void display_set_brightness(uint8_t duty);
 
+/** Re-send DISPON to keep AMOLED panel awake. Call periodically. */
+void display_keep_alive(void);
+
 /** Flip frame buffer 180° for wrist orientation. */
 void display_set_flip(bool flipped);
 

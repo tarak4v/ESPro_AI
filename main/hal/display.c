@@ -237,6 +237,11 @@ void display_set_brightness(uint8_t duty)
     ledc_update_duty(LEDC_LOW_SPEED_MODE, BL_LEDC_CHANNEL);
 }
 
+void display_keep_alive(void)
+{
+    /* no-op: reserved for future use */
+}
+
 void display_set_flip(bool flipped)
 {
     s_flipped = flipped;

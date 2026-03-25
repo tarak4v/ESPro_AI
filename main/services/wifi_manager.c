@@ -8,6 +8,17 @@
 #include "services/config_manager.h"
 #include "core/event_bus.h"
 #include "hal/rtc.h"
+#include "hal/audio.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static void beep_task(void *arg)
+{
+    vTaskDelay(pdMS_TO_TICKS(500)); /* let system settle */
+    audio_beep(1000, 1000);
+    vTaskDelete(NULL);
+}
 
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -25,12 +36,25 @@ static char s_sta_ip[20] = "";
 static wifi_scan_entry_t s_scan_results[WIFI_SCAN_MAX_AP];
 static uint16_t s_scan_count = 0;
 
+static void ntp_sync_cb(struct timeval *tv)
+{
+    struct tm ti;
+    time_t now = tv->tv_sec;
+    localtime_r(&now, &ti);
+    pcf85063_set_time(&ti);
+    event_post(EVT_NTP_SYNCED, 0);
+    ESP_LOGI(TAG, "NTP synced → RTC: %04d-%02d-%02d %02d:%02d:%02d",
+             ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+             ti.tm_hour, ti.tm_min, ti.tm_sec);
+}
+
 static void start_ntp(void)
 {
     if (esp_sntp_enabled())
         return;
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_set_time_sync_notification_cb(ntp_sync_cb);
     esp_sntp_init();
     setenv("TZ", "IST-5:30", 1);
     tzset();
@@ -63,19 +87,27 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         }
         else if (id == WIFI_EVENT_SCAN_DONE)
         {
-            wifi_ap_record_t ap_list[WIFI_SCAN_MAX_AP];
-            uint16_t count = WIFI_SCAN_MAX_AP;
-            esp_wifi_scan_get_ap_records(&count, ap_list);
-            s_scan_count = (count > WIFI_SCAN_MAX_AP) ? WIFI_SCAN_MAX_AP : count;
-            for (uint16_t i = 0; i < s_scan_count; i++)
+            wifi_ap_record_t *ap_list = malloc(sizeof(wifi_ap_record_t) * WIFI_SCAN_MAX_AP);
+            if (ap_list)
             {
-                strncpy(s_scan_results[i].ssid, (const char *)ap_list[i].ssid,
-                        sizeof(s_scan_results[i].ssid) - 1);
-                s_scan_results[i].ssid[sizeof(s_scan_results[i].ssid) - 1] = '\0';
-                s_scan_results[i].rssi = ap_list[i].rssi;
-                s_scan_results[i].authmode = (uint8_t)ap_list[i].authmode;
+                uint16_t count = WIFI_SCAN_MAX_AP;
+                esp_wifi_scan_get_ap_records(&count, ap_list);
+                s_scan_count = (count > WIFI_SCAN_MAX_AP) ? WIFI_SCAN_MAX_AP : count;
+                for (uint16_t i = 0; i < s_scan_count; i++)
+                {
+                    strncpy(s_scan_results[i].ssid, (const char *)ap_list[i].ssid,
+                            sizeof(s_scan_results[i].ssid) - 1);
+                    s_scan_results[i].ssid[sizeof(s_scan_results[i].ssid) - 1] = '\0';
+                    s_scan_results[i].rssi = ap_list[i].rssi;
+                    s_scan_results[i].authmode = (uint8_t)ap_list[i].authmode;
+                }
+                free(ap_list);
+                ESP_LOGI(TAG, "Scan done: %u APs found", s_scan_count);
             }
-            ESP_LOGI(TAG, "Scan done: %u APs found", s_scan_count);
+            else
+            {
+                ESP_LOGE(TAG, "Scan: alloc failed");
+            }
         }
         else if (id == WIFI_EVENT_AP_STACONNECTED)
         {
@@ -94,6 +126,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         ESP_LOGI(TAG, "WiFi connected: %s", s_sta_ip);
         event_post(EVT_WIFI_CONNECTED, 0);
         start_ntp();
+        /* Beep disabled — audio playback disrupts display backlight */
+        // xTaskCreate(beep_task, "beep", 4096, NULL, 2, NULL);
     }
 }
 

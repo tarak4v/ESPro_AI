@@ -7,10 +7,12 @@
 
 #include "lvgl.h"
 
-typedef enum {
+typedef enum
+{
     SCR_HOME = 0,
     SCR_APPS,
     SCR_SETTINGS,
+    SCR_MEETING,
     SCR_COUNT,
 } screen_id_t;
 
@@ -28,5 +30,8 @@ void ui_switch_screen(screen_id_t id);
 
 /** Get current screen ID. */
 screen_id_t ui_get_current_screen(void);
+
+/** Set the center stage text on the home screen (thread-safe, buffered). */
+void scr_home_set_stage_text(const char *text);
 
 #endif /* UI_MANAGER_H */

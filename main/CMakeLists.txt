@@ -14,6 +14,8 @@ idf_component_register(
         "ui/screens/scr_home.c"
         "ui/screens/scr_apps.c"
         "ui/screens/scr_settings.c"
+        "ui/screens/scr_health.c"
+        "ui/screens/scr_meeting.c"
         "ui/widgets/wgt_status_bar.c"
         "ui/widgets/wgt_voice_indicator.c"
         "ai/agent_orchestrator.c"
@@ -21,11 +23,19 @@ idf_component_register(
         "ai/llm_client.c"
         "ai/stt_client.c"
         "ai/intent_engine.c"
+        "ai/action_executor.c"
+        "ai/proactive_agent.c"
         "services/wifi_manager.c"
         "services/storage.c"
         "services/config_manager.c"
         "services/webserver.c"
         "services/ota_manager.c"
+        "services/weather.c"
+        "services/timer_service.c"
+        "services/music_stream.c"
+        "services/power_manager.c"
+        "services/mqtt_service.c"
+        "services/meeting_service.c"
         "test/perf_test.c"
     INCLUDE_DIRS
         "."
@@ -54,4 +64,6 @@ idf_component_register(
         littlefs
         esp_codec_dev
         esp_audio_codec
+        minimp3
+        mqtt
 )

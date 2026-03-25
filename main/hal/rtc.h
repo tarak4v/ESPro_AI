@@ -9,8 +9,13 @@
 #include <stdbool.h>
 #include <time.h>
 
-void rtc_init(void);
-bool rtc_get_time(struct tm *t);
-bool rtc_set_time(const struct tm *t);
+void pcf85063_init(void);
+bool pcf85063_get_time(struct tm *t);
+bool pcf85063_set_time(const struct tm *t);
+
+/* Convenience aliases */
+#define rtc_ext_init pcf85063_init
+#define rtc_ext_get_time pcf85063_get_time
+#define rtc_ext_set_time pcf85063_set_time
 
 #endif /* HAL_RTC_H */

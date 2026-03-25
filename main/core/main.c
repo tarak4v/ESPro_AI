@@ -36,6 +36,7 @@
 /* AI */
 #include "ai/agent_orchestrator.h"
 #include "ai/voice_pipeline.h"
+#include "ai/proactive_agent.h"
 
 /* Services */
 #include "services/wifi_manager.h"
@@ -43,6 +44,10 @@
 #include "services/config_manager.h"
 #include "services/webserver.h"
 #include "services/ota_manager.h"
+#include "services/weather.h"
+#include "services/power_manager.h"
+#include "services/mqtt_service.h"
+#include "services/meeting_service.h"
 
 #include "i2c_bsp.h"
 
@@ -84,17 +89,19 @@ void app_main(void)
 
     /* 4. Sensors */
     imu_init();
-    rtc_init();
+    pcf85063_init();
     ESP_LOGI(TAG, "[4/10] Sensors ready (IMU + RTC)");
 
     /* 5. Audio */
     audio_init();
     ESP_LOGI(TAG, "[5/10] Audio ready");
 
-    /* 6. WiFi (APSTA) + Config Webserver */
+    /* 6. WiFi (APSTA) + services */
     wifi_manager_init();
-    webserver_start();
-    ESP_LOGI(TAG, "[6/10] WiFi APSTA + config portal ready");
+    weather_init();
+    mqtt_service_init();
+    meeting_service_init();
+    ESP_LOGI(TAG, "[6/10] WiFi APSTA + weather + MQTT + meeting ready (portal on-demand)");
 
     /* 7. LVGL + Theme (config-driven) */
     ui_manager_init();
@@ -109,7 +116,9 @@ void app_main(void)
     /* 9. AI */
     voice_pipeline_init();
     agent_orchestrator_init();
-    ESP_LOGI(TAG, "[9/10] AI subsystems ready (STT: %s, LLM: %s)",
+    proactive_agent_register();
+    power_manager_init();
+    ESP_LOGI(TAG, "[9/10] AI + agents + power manager ready (STT: %s, LLM: %s)",
              config_get_provider_name(cfg->stt_provider),
              config_get_provider_name(cfg->llm_provider));
 

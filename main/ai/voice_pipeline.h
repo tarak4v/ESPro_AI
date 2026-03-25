@@ -7,7 +7,8 @@
 
 #include <stdbool.h>
 
-typedef enum {
+typedef enum
+{
     VP_IDLE,
     VP_LISTENING,
     VP_PROCESSING,
@@ -19,7 +20,10 @@ void voice_pipeline_task(void *arg);
 
 voice_pipeline_state_t voice_pipeline_get_state(void);
 
-/** Force-trigger voice listening (e.g., from button press). */
+/** Start listening (call on button press). */
 void voice_pipeline_trigger(void);
+
+/** Stop listening and process (call on button release). */
+void voice_pipeline_stop_listening(void);
 
 #endif /* VOICE_PIPELINE_H */

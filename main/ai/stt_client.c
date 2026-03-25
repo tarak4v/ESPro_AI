@@ -1,6 +1,10 @@
 /**
  * @file stt_client.c
- * @brief Groq Whisper STT — sends WAV audio, receives transcript.
+ * @brief STT client — routes to local Whisper server or cloud (Groq).
+ *
+ * When local_ai_enabled and local_stt_url are configured, audio is sent
+ * to the local network machine's OpenAI-compatible Whisper endpoint.
+ * Otherwise falls back to cloud Groq Whisper API.
  */
 
 #include "ai/stt_client.h"
@@ -16,11 +20,12 @@
 
 static const char *TAG = "stt";
 
-#define GROQ_STT_URL "https://api.groq.com/openai/v1/audio/transcriptions"
+#define CLOUD_STT_URL "https://api.groq.com/openai/v1/audio/transcriptions"
+#define LOCAL_API_PATH "/v1/audio/transcriptions"
 #define MAX_RESP_BUF 4096
 
 /* WAV header for 16-bit mono PCM */
-static void write_wav_header(uint8_t *buf, uint32_t data_size, uint16_t sample_rate)
+static void write_wav_header(uint8_t *buf, uint32_t data_size, uint32_t sample_rate)
 {
     uint32_t file_size = data_size + 36;
     memcpy(buf, "RIFF", 4);
@@ -72,6 +77,14 @@ bool stt_transcribe(const int16_t *samples, size_t count,
     if (!samples || count == 0 || !out)
         return false;
 
+    const device_config_t *cfg = config_get();
+    bool local = cfg->local_ai_enabled && cfg->local_stt_url[0] != '\0';
+
+    /* Select model */
+    const char *model = local ? cfg->local_stt_model : "whisper-large-v3-turbo";
+    if (local && model[0] == '\0')
+        model = "whisper-large-v3";
+
     uint32_t data_size = count * sizeof(int16_t);
     uint32_t wav_size = 44 + data_size;
 
@@ -105,12 +118,15 @@ bool stt_transcribe(const int16_t *samples, size_t count,
     pos += snprintf(body + pos, body_cap - pos,
                     "\r\n--%s\r\n"
                     "Content-Disposition: form-data; name=\"model\"\r\n\r\n"
-                    "whisper-large-v3-turbo"
+                    "%s"
+                    "\r\n--%s\r\n"
+                    "Content-Disposition: form-data; name=\"language\"\r\n\r\n"
+                    "en"
                     "\r\n--%s\r\n"
                     "Content-Disposition: form-data; name=\"response_format\"\r\n\r\n"
                     "text"
                     "\r\n--%s--\r\n",
-                    boundary, boundary, boundary);
+                    boundary, model, boundary, boundary, boundary);
 
     heap_caps_free(wav);
 
@@ -127,30 +143,45 @@ bool stt_transcribe(const int16_t *samples, size_t count,
     }
     ctx.buf[0] = '\0';
 
-    /* HTTP POST — use API key from config_manager */
-    const char *api_key = config_get_api_key(config_get()->stt_provider);
-    if (!api_key || strlen(api_key) == 0)
-    {
-        ESP_LOGE(TAG, "No API key configured for STT provider");
-        heap_caps_free(body);
-        heap_caps_free(ctx.buf);
-        return false;
-    }
-    char auth[256];
-    snprintf(auth, sizeof(auth), "Bearer %s", api_key);
+    /* Build URL and auth */
+    char url[192];
+    char auth[256] = {0};
     char ct[64];
     snprintf(ct, sizeof(ct), "multipart/form-data; boundary=%s", boundary);
 
-    esp_http_client_config_t cfg = {
-        .url = GROQ_STT_URL,
-        .timeout_ms = 15000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
+    if (local)
+    {
+        snprintf(url, sizeof(url), "%s%s", cfg->local_stt_url, LOCAL_API_PATH);
+        ESP_LOGI(TAG, "STT -> local: %s (model=%s)", url, model);
+    }
+    else
+    {
+        strncpy(url, CLOUD_STT_URL, sizeof(url) - 1);
+        url[sizeof(url) - 1] = '\0';
+        const char *api_key = config_get_api_key(cfg->stt_provider);
+        if (!api_key || strlen(api_key) == 0)
+        {
+            ESP_LOGE(TAG, "No API key configured for STT provider");
+            heap_caps_free(body);
+            heap_caps_free(ctx.buf);
+            return false;
+        }
+        snprintf(auth, sizeof(auth), "Bearer %s", api_key);
+    }
+
+    esp_http_client_config_t http_cfg = {
+        .url = url,
+        .timeout_ms = local ? 30000 : 15000,
         .event_handler = http_event_handler,
         .user_data = &ctx,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!local)
+        http_cfg.crt_bundle_attach = esp_crt_bundle_attach;
+
+    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
-    esp_http_client_set_header(client, "Authorization", auth);
+    if (auth[0] != '\0')
+        esp_http_client_set_header(client, "Authorization", auth);
     esp_http_client_set_header(client, "Content-Type", ct);
     esp_http_client_set_post_field(client, body, pos);
 
@@ -165,11 +196,14 @@ bool stt_transcribe(const int16_t *samples, size_t count,
         strncpy(out, ctx.buf, out_len - 1);
         out[out_len - 1] = '\0';
         ok = true;
-        ESP_LOGI(TAG, "STT result (%d chars): %.60s", ctx.len, out);
+        ESP_LOGI(TAG, "STT result (%s, %d chars): %.60s",
+                 local ? "local" : "cloud", ctx.len, out);
     }
     else
     {
-        ESP_LOGE(TAG, "STT error: %s, status=%d", esp_err_to_name(err), status);
+        ESP_LOGE(TAG, "STT error (%s): %s, status=%d, resp: %.200s",
+                 local ? "local" : "cloud",
+                 esp_err_to_name(err), status, ctx.len > 0 ? ctx.buf : "(empty)");
     }
 
     heap_caps_free(ctx.buf);

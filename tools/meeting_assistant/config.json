@@ -1,0 +1,50 @@
+{
+    "mqtt": {
+        "broker": "localhost",
+        "port": 1883,
+        "username": "",
+        "password": "",
+        "device_name": "ESPro_AI_Watch"
+    },
+    "groq_api_key": "",
+    "audio": {
+        "enabled": true,
+        "sample_rate": 16000,
+        "chunk_duration_s": 30,
+        "language": "en"
+    },
+    "meeting_detection": {
+        "poll_interval_s": 2,
+        "window_patterns": {
+            "meet": [
+                "Meet -",
+                "Google Meet"
+            ],
+            "teams": [
+                "Microsoft Teams",
+                "| Microsoft Teams"
+            ],
+            "zoom": [
+                "Zoom Meeting",
+                "Zoom Webinar"
+            ]
+        }
+    },
+    "keyboard_shortcuts": {
+        "meet": {
+            "mic": "ctrl+d",
+            "video": "ctrl+e",
+            "hand": "ctrl+alt+h"
+        },
+        "teams": {
+            "mic": "ctrl+shift+m",
+            "video": "ctrl+shift+o",
+            "hand": "ctrl+shift+k"
+        },
+        "zoom": {
+            "mic": "alt+a",
+            "video": "alt+v",
+            "hand": "alt+y"
+        }
+    }
+}

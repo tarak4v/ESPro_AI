@@ -1,6 +1,10 @@
 /**
  * @file llm_client.c
- * @brief Groq LLM client — Llama 3.3 70B chat completions.
+ * @brief LLM client — routes to local Ollama/network AI or cloud (Groq).
+ *
+ * When local_ai_enabled and local_llm_url are configured, requests go to
+ * the local machine's OpenAI-compatible endpoint (Ollama, vLLM, etc.).
+ * Otherwise falls back to cloud Groq API.
  */
 
 #include "ai/llm_client.h"
@@ -16,8 +20,9 @@
 
 static const char *TAG = "llm";
 
-#define LLM_URL "https://api.groq.com/openai/v1/chat/completions"
-#define LLM_MODEL "llama-3.3-70b-versatile"
+#define CLOUD_LLM_URL "https://api.groq.com/openai/v1/chat/completions"
+#define CLOUD_LLM_MODEL "llama-3.3-70b-versatile"
+#define LOCAL_API_PATH "/v1/chat/completions"
 #define MAX_RESP (8 * 1024)
 
 typedef struct
@@ -43,15 +48,29 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+/* Check if local AI should be used for LLM */
+static bool use_local_llm(const device_config_t *cfg)
+{
+    return cfg->local_ai_enabled && cfg->local_llm_url[0] != '\0';
+}
+
 bool llm_chat(const char *system_prompt, const char *user_msg,
               char *out, size_t out_len)
 {
     if (!user_msg || !out)
         return false;
 
+    const device_config_t *cfg = config_get();
+    bool local = use_local_llm(cfg);
+
+    /* Select model */
+    const char *model = local ? cfg->local_llm_model : CLOUD_LLM_MODEL;
+    if (local && model[0] == '\0')
+        model = "llama3.2";
+
     /* Build JSON body */
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "model", LLM_MODEL);
+    cJSON_AddStringToObject(root, "model", model);
     cJSON *msgs = cJSON_AddArrayToObject(root, "messages");
 
     if (system_prompt)
@@ -88,28 +107,45 @@ bool llm_chat(const char *system_prompt, const char *user_msg,
     }
     ctx.buf[0] = '\0';
 
-    const char *api_key = config_get_api_key(config_get()->llm_provider);
-    if (!api_key || strlen(api_key) == 0)
-    {
-        ESP_LOGE(TAG, "No API key configured for LLM provider");
-        free(body);
-        heap_caps_free(ctx.buf);
-        return false;
-    }
-    char auth[256];
-    snprintf(auth, sizeof(auth), "Bearer %s", api_key);
+    /* Build URL and auth */
+    char url[192];
+    char auth[256] = {0};
 
-    esp_http_client_config_t cfg = {
-        .url = LLM_URL,
-        .timeout_ms = 15000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
+    if (local)
+    {
+        snprintf(url, sizeof(url), "%s%s", cfg->local_llm_url, LOCAL_API_PATH);
+        ESP_LOGI(TAG, "LLM -> local: %s (model=%s)", url, model);
+    }
+    else
+    {
+        strncpy(url, CLOUD_LLM_URL, sizeof(url) - 1);
+        url[sizeof(url) - 1] = '\0';
+        const char *api_key = config_get_api_key(cfg->llm_provider);
+        if (!api_key || strlen(api_key) == 0)
+        {
+            ESP_LOGE(TAG, "No API key configured for LLM provider");
+            free(body);
+            heap_caps_free(ctx.buf);
+            return false;
+        }
+        snprintf(auth, sizeof(auth), "Bearer %s", api_key);
+    }
+
+    esp_http_client_config_t http_cfg = {
+        .url = url,
+        .timeout_ms = local ? 30000 : 15000, /* local models can be slower */
         .event_handler = http_event_handler,
         .user_data = &ctx,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    /* Only attach TLS cert bundle for HTTPS (cloud) */
+    if (!local)
+        http_cfg.crt_bundle_attach = esp_crt_bundle_attach;
+
+    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_header(client, "Authorization", auth);
+    if (auth[0] != '\0')
+        esp_http_client_set_header(client, "Authorization", auth);
     esp_http_client_set_post_field(client, body, strlen(body));
 
     esp_err_t err = esp_http_client_perform(client);
@@ -141,11 +177,12 @@ bool llm_chat(const char *system_prompt, const char *user_msg,
     }
     else
     {
-        ESP_LOGE(TAG, "LLM error: %s, status=%d", esp_err_to_name(err), status);
+        ESP_LOGE(TAG, "LLM error (%s): %s, status=%d",
+                 local ? "local" : "cloud", esp_err_to_name(err), status);
     }
 
     heap_caps_free(ctx.buf);
     if (ok)
-        ESP_LOGI(TAG, "LLM response: %.60s...", out);
+        ESP_LOGI(TAG, "LLM response (%s): %.60s...", local ? "local" : "cloud", out);
     return ok;
 }

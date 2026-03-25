@@ -61,6 +61,20 @@ typedef struct
     /* OTA */
     char ota_url[256];   /* firmware update URL */
     bool ota_auto_check; /* check for updates on boot */
+
+    /* MQTT / Home Assistant */
+    bool mqtt_enabled;     /* enable MQTT client */
+    char mqtt_broker[128]; /* broker URI, e.g. mqtt://192.168.0.100:1883 */
+    char mqtt_user[64];    /* broker username (optional) */
+    char mqtt_pass[64];    /* broker password (optional) */
+
+    /* Network AI — offload to any local machine (Ollama, Whisper, etc.) */
+    bool local_ai_enabled;    /* master toggle for local AI endpoints */
+    char local_llm_url[128];  /* e.g. http://192.168.0.50:11434 */
+    char local_llm_model[64]; /* e.g. llama3.2, mistral, phi3 */
+    char local_stt_url[128];  /* e.g. http://192.168.0.50:8080 */
+    char local_stt_model[64]; /* e.g. whisper-large-v3 */
+    char local_tts_url[128];  /* e.g. http://192.168.0.50:5000 */
 } device_config_t;
 
 /**
@@ -79,7 +93,10 @@ const device_config_t *config_get(void);
  *
  * Valid keys: "wifi_ssid", "wifi_pass", "device_name",
  *             "api_key_groq", "api_key_openai", "api_key_claude",
- *             "api_key_gemini", "api_key_huggingface", "ota_url"
+ *             "api_key_gemini", "api_key_huggingface", "ota_url",
+ *             "mqtt_broker", "mqtt_user", "mqtt_pass",
+ *             "local_llm_url", "local_llm_model", "local_stt_url",
+ *             "local_stt_model", "local_tts_url"
  */
 bool config_set_str(const char *key, const char *value);
 
@@ -88,7 +105,8 @@ bool config_set_str(const char *key, const char *value);
  * @return true on success.
  *
  * Valid keys: "wifi_hidden" (0/1), "stt_provider", "llm_provider",
- *             "theme_id", "ota_auto_check" (0/1)
+ *             "theme_id", "ota_auto_check" (0/1), "mqtt_enabled" (0/1),
+ *             "local_ai_enabled" (0/1)
  */
 bool config_set_u8(const char *key, uint8_t value);
 

@@ -12,34 +12,35 @@ static const char *TAG = "rtc";
 
 static i2c_master_dev_handle_t s_rtc_dev = NULL;
 
-#define RTC_REG_SEC   0x04
-#define bcd2dec(v)    (((v) >> 4) * 10 + ((v) & 0x0F))
-#define dec2bcd(v)    ((((v) / 10) << 4) | ((v) % 10))
+#define RTC_REG_SEC 0x04
+#define bcd2dec(v) (((v) >> 4) * 10 + ((v) & 0x0F))
+#define dec2bcd(v) ((((v) / 10) << 4) | ((v) % 10))
 
-void rtc_init(void)
+void pcf85063_init(void)
 {
-    extern i2c_master_dev_handle_t rtc_device_handle;
-    s_rtc_dev = rtc_device_handle;
+    extern i2c_master_dev_handle_t rtc_dev_handle;
+    s_rtc_dev = rtc_dev_handle;
     ESP_LOGI(TAG, "PCF85063 RTC initialised");
 }
 
-bool rtc_get_time(struct tm *t)
+bool pcf85063_get_time(struct tm *t)
 {
     uint8_t buf[7];
-    if (i2c_read_buff(s_rtc_dev, RTC_REG_SEC, buf, 7) != ESP_OK) return false;
+    if (i2c_read_buff(s_rtc_dev, RTC_REG_SEC, buf, 7) != ESP_OK)
+        return false;
 
-    t->tm_sec  = bcd2dec(buf[0] & 0x7F);
-    t->tm_min  = bcd2dec(buf[1] & 0x7F);
+    t->tm_sec = bcd2dec(buf[0] & 0x7F);
+    t->tm_min = bcd2dec(buf[1] & 0x7F);
     t->tm_hour = bcd2dec(buf[2] & 0x3F);
     t->tm_mday = bcd2dec(buf[3] & 0x3F);
     t->tm_wday = buf[4] & 0x07;
-    t->tm_mon  = bcd2dec(buf[5] & 0x1F) - 1;
-    t->tm_year = bcd2dec(buf[6]) + 100;  /* Years since 1900 */
+    t->tm_mon = bcd2dec(buf[5] & 0x1F) - 1;
+    t->tm_year = bcd2dec(buf[6]) + 100; /* Years since 1900 */
 
     return true;
 }
 
-bool rtc_set_time(const struct tm *t)
+bool pcf85063_set_time(const struct tm *t)
 {
     uint8_t buf[7] = {
         dec2bcd(t->tm_sec),

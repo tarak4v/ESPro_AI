@@ -9,6 +9,8 @@
 #include "core/event_bus.h"
 #include "core/perf_monitor.h"
 #include "hal/touch.h"
+#include "hal/display.h"
+#include "services/power_manager.h"
 #include "hw_config.h"
 #include "i2c_bsp.h"
 #include "driver/i2c_master.h"
@@ -44,11 +46,15 @@ extern void scr_apps_destroy(void);
 extern void scr_settings_create(void);
 extern void scr_settings_update(void);
 extern void scr_settings_destroy(void);
+extern void scr_meeting_create(void);
+extern void scr_meeting_update(void);
+extern void scr_meeting_destroy(void);
 
 static const screen_ops_t s_screens[SCR_COUNT] = {
     [SCR_HOME] = {scr_home_create, scr_home_update, scr_home_destroy},
     [SCR_APPS] = {scr_apps_create, scr_apps_update, scr_apps_destroy},
     [SCR_SETTINGS] = {scr_settings_create, scr_settings_update, scr_settings_destroy},
+    [SCR_MEETING] = {scr_meeting_create, scr_meeting_update, scr_meeting_destroy},
 };
 
 /* ── Swipe detection state ── */
@@ -67,7 +73,14 @@ static void indev_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     uint8_t buf[32];
     memset(buf, 0, sizeof(buf));
 
-    uint8_t ret = i2c_master_touch_write_read(disp_touch_dev_handle, cmd, 11, buf, 32);
+    /* Use separate transmit + receive (full STOP between write/read)
+       instead of combined transmit_receive (repeated start).
+       The AXS15231B touch needs the STOP to process the command. */
+    esp_err_t ret = i2c_master_transmit(disp_touch_dev_handle, cmd, 11, 100);
+    if (ret == ESP_OK)
+    {
+        ret = i2c_master_receive(disp_touch_dev_handle, buf, 32, 100);
+    }
 
     /* Debug: log first few calls and any touch events */
     s_indev_call_count++;
@@ -76,6 +89,12 @@ static void indev_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
         ESP_LOGI(TAG, "indev_cb #%lu: ret=%d buf[0..5]=%02X %02X %02X %02X %02X %02X",
                  (unsigned long)s_indev_call_count, ret,
                  buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
+    }
+
+    if (ret != ESP_OK)
+    {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
     }
 
     uint16_t px = (((uint16_t)buf[2] & 0x0F) << 8) | (uint16_t)buf[3];
@@ -217,9 +236,12 @@ void app_manager_task(void *arg)
             s_switch_pending = false;
             if (lvgl_lock(100))
             {
-                s_screens[s_current].destroy();
+                /* Create new screen first (calls lv_disp_load_scr),
+                   THEN destroy old one — avoids dangling act_scr pointer */
+                screen_id_t old = s_current;
                 s_current = s_pending;
                 s_screens[s_current].create();
+                s_screens[old].destroy();
                 lvgl_unlock();
                 event_post(EVT_SCREEN_CHANGE, (int32_t)s_current);
                 ESP_LOGI(TAG, "Switched to screen %d", s_current);
@@ -232,6 +254,9 @@ void app_manager_task(void *arg)
             s_screens[s_current].update();
             lvgl_unlock();
         }
+
+        /* Power management — auto-dim/sleep */
+        power_manager_tick();
 
         vTaskDelay(pdMS_TO_TICKS(100));
     }

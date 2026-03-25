@@ -34,6 +34,16 @@ static void apply_defaults(void)
     s_config.theme_id = THEME_DARK;
     strncpy(s_config.ota_url, "", sizeof(s_config.ota_url) - 1);
     s_config.ota_auto_check = false;
+    s_config.mqtt_enabled = false;
+    strncpy(s_config.mqtt_broker, "", sizeof(s_config.mqtt_broker) - 1);
+    strncpy(s_config.mqtt_user, "", sizeof(s_config.mqtt_user) - 1);
+    strncpy(s_config.mqtt_pass, "", sizeof(s_config.mqtt_pass) - 1);
+    s_config.local_ai_enabled = false;
+    strncpy(s_config.local_llm_url, "", sizeof(s_config.local_llm_url) - 1);
+    strncpy(s_config.local_llm_model, "llama3.2", sizeof(s_config.local_llm_model) - 1);
+    strncpy(s_config.local_stt_url, "", sizeof(s_config.local_stt_url) - 1);
+    strncpy(s_config.local_stt_model, "whisper-large-v3", sizeof(s_config.local_stt_model) - 1);
+    strncpy(s_config.local_tts_url, "", sizeof(s_config.local_tts_url) - 1);
 }
 
 /* ── NVS helpers ── */
@@ -68,6 +78,10 @@ void config_manager_init(void)
         nvs_load_str(h, "key_hf", s_config.api_key_huggingface, sizeof(s_config.api_key_huggingface));
         nvs_load_str(h, "ota_url", s_config.ota_url, sizeof(s_config.ota_url));
 
+        nvs_load_str(h, "mqtt_uri", s_config.mqtt_broker, sizeof(s_config.mqtt_broker));
+        nvs_load_str(h, "mqtt_user", s_config.mqtt_user, sizeof(s_config.mqtt_user));
+        nvs_load_str(h, "mqtt_pass", s_config.mqtt_pass, sizeof(s_config.mqtt_pass));
+
         uint8_t tmp;
         tmp = 0;
         nvs_load_u8(h, "wifi_hide", &tmp);
@@ -87,6 +101,18 @@ void config_manager_init(void)
         tmp = 0;
         nvs_load_u8(h, "ota_auto", &tmp);
         s_config.ota_auto_check = (tmp != 0);
+        tmp = 0;
+        nvs_load_u8(h, "mqtt_en", &tmp);
+        s_config.mqtt_enabled = (tmp != 0);
+
+        tmp = 0;
+        nvs_load_u8(h, "local_ai_en", &tmp);
+        s_config.local_ai_enabled = (tmp != 0);
+        nvs_load_str(h, "loc_llm_url", s_config.local_llm_url, sizeof(s_config.local_llm_url));
+        nvs_load_str(h, "loc_llm_mod", s_config.local_llm_model, sizeof(s_config.local_llm_model));
+        nvs_load_str(h, "loc_stt_url", s_config.local_stt_url, sizeof(s_config.local_stt_url));
+        nvs_load_str(h, "loc_stt_mod", s_config.local_stt_model, sizeof(s_config.local_stt_model));
+        nvs_load_str(h, "loc_tts_url", s_config.local_tts_url, sizeof(s_config.local_tts_url));
 
         nvs_close(h);
         ESP_LOGI(TAG, "Config loaded from NVS (device: %s, theme: %d)", s_config.device_name, s_config.theme_id);
@@ -166,6 +192,54 @@ bool config_set_str(const char *key, const char *value)
         max = sizeof(s_config.ota_url);
         strncpy(nvs_key, "ota_url", sizeof(nvs_key) - 1);
     }
+    else if (strcmp(key, "mqtt_broker") == 0)
+    {
+        dest = s_config.mqtt_broker;
+        max = sizeof(s_config.mqtt_broker);
+        strncpy(nvs_key, "mqtt_uri", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "mqtt_user") == 0)
+    {
+        dest = s_config.mqtt_user;
+        max = sizeof(s_config.mqtt_user);
+        strncpy(nvs_key, "mqtt_user", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "mqtt_pass") == 0)
+    {
+        dest = s_config.mqtt_pass;
+        max = sizeof(s_config.mqtt_pass);
+        strncpy(nvs_key, "mqtt_pass", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "local_llm_url") == 0)
+    {
+        dest = s_config.local_llm_url;
+        max = sizeof(s_config.local_llm_url);
+        strncpy(nvs_key, "loc_llm_url", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "local_llm_model") == 0)
+    {
+        dest = s_config.local_llm_model;
+        max = sizeof(s_config.local_llm_model);
+        strncpy(nvs_key, "loc_llm_mod", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "local_stt_url") == 0)
+    {
+        dest = s_config.local_stt_url;
+        max = sizeof(s_config.local_stt_url);
+        strncpy(nvs_key, "loc_stt_url", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "local_stt_model") == 0)
+    {
+        dest = s_config.local_stt_model;
+        max = sizeof(s_config.local_stt_model);
+        strncpy(nvs_key, "loc_stt_mod", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "local_tts_url") == 0)
+    {
+        dest = s_config.local_tts_url;
+        max = sizeof(s_config.local_tts_url);
+        strncpy(nvs_key, "loc_tts_url", sizeof(nvs_key) - 1);
+    }
     else
     {
         ESP_LOGW(TAG, "Unknown str key: %s", key);
@@ -223,6 +297,16 @@ bool config_set_u8(const char *key, uint8_t value)
     {
         s_config.ota_auto_check = (value != 0);
         strncpy(nvs_key, "ota_auto", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "mqtt_enabled") == 0)
+    {
+        s_config.mqtt_enabled = (value != 0);
+        strncpy(nvs_key, "mqtt_en", sizeof(nvs_key) - 1);
+    }
+    else if (strcmp(key, "local_ai_enabled") == 0)
+    {
+        s_config.local_ai_enabled = (value != 0);
+        strncpy(nvs_key, "local_ai_en", sizeof(nvs_key) - 1);
     }
     else
     {
@@ -282,11 +366,21 @@ bool config_save_all(void)
     nvs_set_str(h, "key_gemini", s_config.api_key_gemini);
     nvs_set_str(h, "key_hf", s_config.api_key_huggingface);
     nvs_set_str(h, "ota_url", s_config.ota_url);
+    nvs_set_str(h, "mqtt_uri", s_config.mqtt_broker);
+    nvs_set_str(h, "mqtt_user", s_config.mqtt_user);
+    nvs_set_str(h, "mqtt_pass", s_config.mqtt_pass);
     nvs_set_u8(h, "wifi_hide", s_config.wifi_hidden ? 1 : 0);
     nvs_set_u8(h, "stt_prov", (uint8_t)s_config.stt_provider);
     nvs_set_u8(h, "llm_prov", (uint8_t)s_config.llm_provider);
     nvs_set_u8(h, "theme_id", (uint8_t)s_config.theme_id);
     nvs_set_u8(h, "ota_auto", s_config.ota_auto_check ? 1 : 0);
+    nvs_set_u8(h, "mqtt_en", s_config.mqtt_enabled ? 1 : 0);
+    nvs_set_u8(h, "local_ai_en", s_config.local_ai_enabled ? 1 : 0);
+    nvs_set_str(h, "loc_llm_url", s_config.local_llm_url);
+    nvs_set_str(h, "loc_llm_mod", s_config.local_llm_model);
+    nvs_set_str(h, "loc_stt_url", s_config.local_stt_url);
+    nvs_set_str(h, "loc_stt_mod", s_config.local_stt_model);
+    nvs_set_str(h, "loc_tts_url", s_config.local_tts_url);
 
     nvs_commit(h);
     nvs_close(h);

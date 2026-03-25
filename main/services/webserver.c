@@ -119,6 +119,29 @@ static const char CONFIG_PAGE[] =
     "<div id='ota-status'></div>"
     "</div>"
 
+    /* MQTT / Home Assistant Section */
+    "<div class='card'>"
+    "<h2>MQTT / Home Assistant</h2>"
+    "<div class='toggle'><input type='checkbox' id='mqtt_enabled'><label for='mqtt_enabled'>Enable MQTT</label></div>"
+    "<label>Broker URI</label><input type='text' id='mqtt_broker' placeholder='mqtt://192.168.0.100:1883'>"
+    "<label>Username (optional)</label><input type='text' id='mqtt_user' placeholder='mqtt_user'>"
+    "<label>Password (optional)</label><input type='password' id='mqtt_pass' placeholder='mqtt_password'>"
+    "<div id='mqtt-status' style='margin-top:6px;font-size:.85em;color:#888'></div>"
+    "</div>"
+
+    /* Network AI Section */
+    "<div class='card'>"
+    "<h2>&#x1F5A7; Network AI (Ollama / Local)</h2>"
+    "<p style='font-size:.8em;color:#888;margin-bottom:8px'>Offload AI to any machine on your network running Ollama, vLLM, faster-whisper, etc. Uses OpenAI-compatible API.</p>"
+    "<div class='toggle'><input type='checkbox' id='local_ai_enabled'><label for='local_ai_enabled'>Enable Network AI</label></div>"
+    "<label>LLM Endpoint</label><input type='text' id='local_llm_url' placeholder='http://192.168.0.50:11434'>"
+    "<label>LLM Model</label><input type='text' id='local_llm_model' placeholder='llama3.2'>"
+    "<label>STT Endpoint</label><input type='text' id='local_stt_url' placeholder='http://192.168.0.50:8080'>"
+    "<label>STT Model</label><input type='text' id='local_stt_model' placeholder='whisper-large-v3'>"
+    "<label>TTS Endpoint (future)</label><input type='text' id='local_tts_url' placeholder='http://192.168.0.50:5000'>"
+    "<div id='local-ai-status' style='margin-top:6px;font-size:.85em;color:#888'></div>"
+    "</div>"
+
     /* Actions */
     "<div class='card' style='text-align:center'>"
     "<button onclick='saveConfig()'>Save All Settings</button> "
@@ -147,6 +170,18 @@ static const char CONFIG_PAGE[] =
     "$('theme_id').value=c.theme_id||0;"
     "$('ota_url').value=c.ota_url||'';"
     "$('ota_auto_check').checked=!!c.ota_auto_check;"
+    "$('mqtt_enabled').checked=!!c.mqtt_enabled;"
+    "$('mqtt_broker').value=c.mqtt_broker||'';"
+    "$('mqtt_user').value=c.mqtt_user||'';"
+    "$('mqtt_pass').value=c.mqtt_pass||'';"
+    "$('mqtt-status').textContent='MQTT: '+(c.mqtt_status||'N/A');"
+    "$('local_ai_enabled').checked=!!c.local_ai_enabled;"
+    "$('local_llm_url').value=c.local_llm_url||'';"
+    "$('local_llm_model').value=c.local_llm_model||'';"
+    "$('local_stt_url').value=c.local_stt_url||'';"
+    "$('local_stt_model').value=c.local_stt_model||'';"
+    "$('local_tts_url').value=c.local_tts_url||'';"
+    "$('local-ai-status').textContent=c.local_ai_enabled?'Network AI: Enabled':'Network AI: Disabled';"
     "$('wifi-status').textContent=c.sta_ip?'Connected: '+c.sta_ip:'Not connected';"
     "$('fw-ver').textContent='FW: '+c.fw_version;"
     "}).catch(e=>msg('Load failed: '+e,false))}"
@@ -166,7 +201,17 @@ static const char CONFIG_PAGE[] =
     "api_key_huggingface:$('api_key_huggingface').value,"
     "theme_id:parseInt($('theme_id').value),"
     "ota_url:$('ota_url').value,"
-    "ota_auto_check:$('ota_auto_check').checked?1:0"
+    "ota_auto_check:$('ota_auto_check').checked?1:0,"
+    "mqtt_enabled:$('mqtt_enabled').checked?1:0,"
+    "mqtt_broker:$('mqtt_broker').value,"
+    "mqtt_user:$('mqtt_user').value,"
+    "mqtt_pass:$('mqtt_pass').value,"
+    "local_ai_enabled:$('local_ai_enabled').checked?1:0,"
+    "local_llm_url:$('local_llm_url').value,"
+    "local_llm_model:$('local_llm_model').value,"
+    "local_stt_url:$('local_stt_url').value,"
+    "local_stt_model:$('local_stt_model').value,"
+    "local_tts_url:$('local_tts_url').value"
     "};"
     "fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})"
     ".then(r=>r.json()).then(r=>{msg(r.status==='ok'?'Settings saved!':'Error: '+r.error,r.status==='ok')})"
@@ -239,6 +284,23 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "theme_id", (int)cfg->theme_id);
     cJSON_AddStringToObject(root, "ota_url", cfg->ota_url);
     cJSON_AddNumberToObject(root, "ota_auto_check", cfg->ota_auto_check ? 1 : 0);
+    cJSON_AddNumberToObject(root, "mqtt_enabled", cfg->mqtt_enabled ? 1 : 0);
+    cJSON_AddStringToObject(root, "mqtt_broker", cfg->mqtt_broker);
+    cJSON_AddStringToObject(root, "mqtt_user", cfg->mqtt_user);
+    cJSON_AddStringToObject(root, "mqtt_pass", cfg->mqtt_pass);
+
+    /* Network AI config */
+    cJSON_AddNumberToObject(root, "local_ai_enabled", cfg->local_ai_enabled ? 1 : 0);
+    cJSON_AddStringToObject(root, "local_llm_url", cfg->local_llm_url);
+    cJSON_AddStringToObject(root, "local_llm_model", cfg->local_llm_model);
+    cJSON_AddStringToObject(root, "local_stt_url", cfg->local_stt_url);
+    cJSON_AddStringToObject(root, "local_stt_model", cfg->local_stt_model);
+    cJSON_AddStringToObject(root, "local_tts_url", cfg->local_tts_url);
+
+    /* MQTT status */
+    extern const char *mqtt_status_str(void);
+    cJSON_AddStringToObject(root, "mqtt_status", mqtt_status_str());
+
     cJSON_AddStringToObject(root, "sta_ip", wifi_get_sta_ip());
     cJSON_AddStringToObject(root, "ap_ip", wifi_get_ap_ip());
 
@@ -297,7 +359,10 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     cJSON *item;
     const char *str_keys[] = {"wifi_ssid", "wifi_pass", "device_name",
                               "api_key_groq", "api_key_openai", "api_key_claude",
-                              "api_key_gemini", "api_key_huggingface", "ota_url"};
+                              "api_key_gemini", "api_key_huggingface", "ota_url",
+                              "mqtt_broker", "mqtt_user", "mqtt_pass",
+                              "local_llm_url", "local_llm_model",
+                              "local_stt_url", "local_stt_model", "local_tts_url"};
     for (int i = 0; i < (int)(sizeof(str_keys) / sizeof(str_keys[0])); i++)
     {
         item = cJSON_GetObjectItem(root, str_keys[i]);
@@ -308,7 +373,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     }
 
     /* Apply uint8 fields */
-    const char *u8_keys[] = {"wifi_hidden", "stt_provider", "llm_provider", "theme_id", "ota_auto_check"};
+    const char *u8_keys[] = {"wifi_hidden", "stt_provider", "llm_provider", "theme_id", "ota_auto_check", "mqtt_enabled", "local_ai_enabled"};
     for (int i = 0; i < (int)(sizeof(u8_keys) / sizeof(u8_keys[0])); i++)
     {
         item = cJSON_GetObjectItem(root, u8_keys[i]);
@@ -523,7 +588,7 @@ void webserver_start(void)
         return;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 8;
+    config.max_uri_handlers = 10;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
 

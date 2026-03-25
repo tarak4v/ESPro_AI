@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-AI-first multi-modal smartwatch OS for ESP32-S3 (Waveshare 3.49" AMOLED).
+AI-first multi-modal OS for ESP32-S3 (Waveshare 3.49" AMOLED).
 Built with **ESP-IDF v5.5.1**, **LVGL v8.4**, **FreeRTOS**.
 
 **Design Philosophy:** Every interaction is AI-mediated. Voice is the primary
